@@ -1,6 +1,6 @@
 {
   "name": "obsidian-worktree-switcher",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "private": true,
   "description": "Switch notes and the file tree between Git worktrees in the same window, and inspect changes and Markdown previews.",
   "license": "MIT",
@@ -11,7 +11,8 @@
   "scripts": {
     "test": "node --test *.test.cjs",
     "check": "node scripts/check-release.cjs",
-    "package": "node scripts/package.cjs"
+    "package": "npm run build",
+    "build": "node scripts/package.cjs"
   },
   "repository": {
     "type": "git",

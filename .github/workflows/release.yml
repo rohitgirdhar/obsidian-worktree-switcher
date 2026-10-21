@@ -17,7 +17,7 @@ jobs:
           node-version: '22'
       - run: npm ci
       - run: npm test
-      - run: npm run package
+      - run: npm run build
       - name: Verify existing release before attesting a manual rebuild
         if: github.event_name == 'workflow_dispatch'
         env:

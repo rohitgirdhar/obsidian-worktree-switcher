@@ -3,7 +3,7 @@
 Switch Obsidian's notes and file tree between Git worktrees in the same window.
 Inspect changed files, read diffs, and preview Markdown.
 
-[Download 0.0.2](https://github.com/rohitgirdhar/obsidian-worktree-switcher/releases/tag/0.0.2)
+[Download 0.0.3](https://github.com/rohitgirdhar/obsidian-worktree-switcher/releases/tag/0.0.3)
 
 ![Animated demo: create a worktree, edit hello.md, and switch Obsidian in the same window](assets/demo.gif)
 
@@ -69,19 +69,22 @@ unchanged Git refs. Graphical macOS and Windows verification remains outstanding
 Automated tests run on Linux and macOS. Graphical editor-buffer recovery remains
 unverified because Obsidian may close deleted files' tabs before switching.
 
-The plugin reads the configured repository and worktrees, including paths outside
-the current vault, and writes editor recovery files. It has no telemetry or
-network requests. Folder icons ask the operating system to reveal a worktree.
+To list and switch worktrees, the plugin reads Git metadata and note files in the
+configured repository, including worktrees outside the open vault. It enumerates
+vault paths to refresh Obsidian's file tree. If the active worktree is deleted,
+it can write open text buffers to `.obsidian/worktree-recovery/` in the original
+vault. Previews stay inside the selected worktree. Folder icons ask the operating
+system to reveal that worktree. The plugin has no telemetry or network requests.
 Markdown rendering uses Obsidian's normal renderer and plugin behavior.
 
 Previews reject paths and symlinks that resolve outside the selected worktree.
 Git diff disables external diff and text-conversion commands.
 
-Git runs directly with an argument array through `execFile`, without a command
-shell. Only status, diff, log, revision, merge-base, and worktree-list queries
-are allowed. File enumeration checks that Obsidian's tree matches the selected
-worktree after switching. These operations require desktop filesystem access;
-they do not grant the plugin a separate operating-system sandbox.
+Git runs as a child process with fixed arguments. The plugin only requests read-only
+status, diff, log, revision, merge-base, and worktree-list operations; it does not
+run a command shell or perform Git writes. Diff output disables external diff and
+text conversion. These operations still use the operating-system permissions of
+Obsidian and are not isolated by a separate sandbox.
 
 ## Development
 
@@ -91,7 +94,7 @@ Node.js 20 or later. No runtime or build dependencies.
 npm ci
 npm test
 npm run check
-npm run package
+npm run build
 ```
 
 `dist/` contains the runtime files, LICENSE, NOTICE, installation ZIP, and

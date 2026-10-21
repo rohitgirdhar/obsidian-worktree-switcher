@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.3, 2026-10-21
+
+Add a reproducible `npm run build` command for verification. Document the
+filesystem access required to view and switch worktrees, save recovery files,
+and refresh Obsidian's file tree.
+
 ## 0.0.2, 2026-10-21
 
 Add an npm lockfile and attested release builds. Release assets now contain only
