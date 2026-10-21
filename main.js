@@ -49,7 +49,7 @@ async function git(cwd, args) {
     'Worktree Switcher only runs read-only Git queries.');
   try {
     // Avoid index locks and external diff tools during background queries.
-    const safeArgs = args[0] === 'diff' ? ['diff', '--no-ext-diff', '--no-color', ...args.slice(1)] : args;
+    const safeArgs = args[0] === 'diff' ? ['diff', '--no-ext-diff', '--no-textconv', '--no-color', ...args.slice(1)] : args;
     const { stdout } = await execFileP('git', ['--no-optional-locks', ...safeArgs], { cwd, maxBuffer: 10 * 1024 * 1024 });
     return stdout;
   } catch (err) {
@@ -143,6 +143,17 @@ function invariant(condition, message) {
 function within(root, candidate) {
   const relative = path.relative(root, candidate);
   return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
+}
+
+function readWorktreeFile(root, file) {
+  invariant(typeof file === 'string' && file.length > 0 && !path.isAbsolute(file),
+    'Preview paths must be relative to the selected worktree.');
+  const realRoot = fs.realpathSync(root);
+  const candidate = path.resolve(realRoot, file);
+  invariant(within(realRoot, candidate), 'The preview path escapes its worktree.');
+  const realFile = fs.realpathSync(candidate);
+  invariant(within(realRoot, realFile), 'The preview symlink escapes its worktree.');
+  return fs.readFileSync(realFile, 'utf8');
 }
 
 // Worktrees keep their own files. Switching opens the corresponding vault;
@@ -323,7 +334,7 @@ function isHiddenPath(file) {
 
 if (!obsidian) {
   module.exports = {
-    git, parseNameStatus, parseStatusZ, unionChanges,
+    git, parseNameStatus, parseStatusZ, unionChanges, readWorktreeFile,
     resolveWorktreeVault, isHiddenPath, preserveDeletedWorktreeBuffers,
     scanWorktreeVault, rebaseWorktreeVault,
   };
@@ -705,9 +716,9 @@ class WorktreeFileView extends ItemView {
       const abs = path.join(wtPath, file);
       let content;
       try {
-        content = fs.readFileSync(abs, 'utf8');
+        content = readWorktreeFile(wtPath, file);
       } catch (e) {
-        body.createDiv({ cls: 'worktree-view-error', text: `Cannot read ${abs} (deleted in this worktree?)` });
+        body.createDiv({ cls: 'worktree-view-error', text: `Cannot preview ${file}: ${e.message}` });
         return;
       }
       if (file.endsWith('.md')) {

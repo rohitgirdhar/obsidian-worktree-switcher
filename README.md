@@ -3,7 +3,7 @@
 Switch Obsidian's notes and file tree between Git worktrees in the same window.
 Inspect changed files, read diffs, and preview Markdown.
 
-[Download 0.0.1](https://github.com/rohitgirdhar/obsidian-worktree-switcher/releases/tag/0.0.1)
+[Download 0.0.2](https://github.com/rohitgirdhar/obsidian-worktree-switcher/releases/tag/0.0.2)
 
 ![Animated demo: create a worktree, edit hello.md, and switch Obsidian in the same window](assets/demo.gif)
 
@@ -16,11 +16,14 @@ Switching back shows main's original text.
 
 Requires desktop Obsidian 1.14.4 or later and Git on PATH.
 
-1. Download `worktree-switcher-0.0.1.zip` from the release page.
-2. Extract its `worktree-switcher` folder into `<vault>/.obsidian/plugins/`.
+1. Download `main.js`, `manifest.json`, and `styles.css` from the release page.
+2. Copy all three into `<vault>/.obsidian/plugins/worktree-switcher/`.
 3. Enable **Worktree Switcher** in Settings → Community plugins.
 
-For automatic updates, use
+[Community directory listing](https://community.obsidian.md/plugins/worktree-switcher).
+Availability in Obsidian depends on directory review and publication.
+
+For automatic updates before directory availability, use
 [BRAT](https://github.com/TfTHacker/obsidian42-brat) to add
 `rohitgirdhar/obsidian-worktree-switcher`, select **Latest version**, and enable
 its update checks at startup. Manual installations require downloading each release.
@@ -71,6 +74,9 @@ the current vault, and writes editor recovery files. It has no telemetry or
 network requests. Folder icons ask the operating system to reveal a worktree.
 Markdown rendering uses Obsidian's normal renderer and plugin behavior.
 
+Previews reject paths and symlinks that resolve outside the selected worktree.
+Git diff disables external diff and text-conversion commands.
+
 Git runs directly with an argument array through `execFile`, without a command
 shell. Only status, diff, log, revision, merge-base, and worktree-list queries
 are allowed. File enumeration checks that Obsidian's tree matches the selected
@@ -89,9 +95,10 @@ npm run package
 ```
 
 `dist/` contains the runtime files, LICENSE, NOTICE, installation ZIP, and
-SHA256SUMS. A version tag builds a draft GitHub release with GitHub artifact
-attestations. A manual workflow run only attests a rebuild after checking that
-all build files match the existing release. Verify a downloaded asset with:
+SHA256SUMS for local packaging. GitHub releases contain only `main.js`,
+`manifest.json`, and `styles.css`, with GitHub artifact attestations. A manual
+workflow run only attests a rebuild after checking those three files against the
+existing release. Verify a downloaded asset with:
 
 ```sh
 gh attestation verify main.js --repo rohitgirdhar/obsidian-worktree-switcher
@@ -101,5 +108,5 @@ gh attestation verify main.js --repo rohitgirdhar/obsidian-worktree-switcher
 
 [MIT](LICENSE). Derived from [Worktree Viewer](https://github.com/sjwinkler19/obsidian-worktree-viewer)
 by Sebastian Winkler. Sebastian Winkler's copyright notice is preserved alongside Rohit Girdhar's
-notice for this project's changes. Release ZIPs include [NOTICE](NOTICE) and
-LICENSE; `main.js` also carries the complete license.
+notice for this project's changes. Local installation ZIPs include [NOTICE](NOTICE)
+and LICENSE; `main.js` also carries the complete license.

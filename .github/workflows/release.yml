@@ -26,20 +26,23 @@ jobs:
           version=$(node -p 'require("./manifest.json").version')
           verify_dir=$(mktemp -d)
           gh release download "$version" --dir "$verify_dir"
-          for asset in dist/*; do
+          for asset in dist/main.js dist/manifest.json dist/styles.css; do
             cmp "$asset" "$verify_dir/$(basename "$asset")"
           done
       - name: Attest release assets
         uses: actions/attest@v4
         with:
-          subject-path: 'dist/*'
+          subject-path: |
+            dist/main.js
+            dist/manifest.json
+            dist/styles.css
       - name: Create draft release
         if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+            gh release upload "$GITHUB_REF_NAME" dist/main.js dist/manifest.json dist/styles.css --clobber
           else
-            gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --draft --title "$GITHUB_REF_NAME" --notes-file CHANGELOG.md
+            gh release create "$GITHUB_REF_NAME" dist/main.js dist/manifest.json dist/styles.css --verify-tag --draft --title "$GITHUB_REF_NAME" --notes-file CHANGELOG.md
           fi
