@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.4, 2026-10-21
+
+Add the Worktree Switcher icon to the ribbon and panel tab. Rename the panel
+command and ribbon tooltip to "Switch Worktrees".
+
 ## 0.0.3, 2026-10-21
 
 Add a reproducible `npm run build` command for verification. Document the

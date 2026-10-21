@@ -1,9 +1,11 @@
+<img src="assets/logo.svg" width="56" alt="Worktree Switcher logo">
+
 # Worktree Switcher
 
 Switch Obsidian's notes and file tree between Git worktrees in the same window.
 Inspect changed files, read diffs, and preview Markdown.
 
-[Download 0.0.3](https://github.com/rohitgirdhar/obsidian-worktree-switcher/releases/tag/0.0.3)
+[Download 0.0.4](https://github.com/rohitgirdhar/obsidian-worktree-switcher/releases/tag/0.0.4)
 
 ![Animated demo: create a worktree, edit hello.md, and switch Obsidian in the same window](assets/demo.gif)
 
@@ -34,8 +36,8 @@ Open a vault inside the main checkout of a Git repository. Create worktrees with
 Git or another tool, for example `git worktree add ../hello-edit -b edit-hello`.
 Each worktree must contain the vault at the same relative path.
 
-Open **Worktree Switcher: Open git worktrees** from the command palette, or click
-the Git branch ribbon icon. Click a worktree's two-arrow icon to switch; a check
+Open **Worktree Switcher: Switch Worktrees** from the command palette, or click
+the Worktree Switcher ribbon icon. Click a worktree's two-arrow icon to switch; a check
 marks the current worktree. The panel picker and status-bar picker also switch.
 Expand a row to open its changed-file diff or Markdown preview.
 

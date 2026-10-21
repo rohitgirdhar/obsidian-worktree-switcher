@@ -343,7 +343,17 @@ if (!obsidian) {
 
 // ---------------- Obsidian layer ----------------
 
-const { Plugin, ItemView, PluginSettingTab, Setting, SuggestModal, Events, MarkdownRenderer, Notice, setIcon } = obsidian;
+const { Plugin, ItemView, PluginSettingTab, Setting, SuggestModal, Events, MarkdownRenderer, Notice, setIcon, addIcon } = obsidian;
+
+const ICON_ID = 'worktree-switcher';
+const ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100">
+  <g fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M20 18v70M80 12v70"/>
+    <circle cx="20" cy="12" r="6"/>
+    <circle cx="80" cy="88" r="6"/>
+    <path d="M29 37h42m-12-11 12 11-12 11M71 63H29m12-11-12 11 12 11"/>
+  </g>
+</svg>`;
 
 const VIEW_TYPE = 'worktree-switcher-view';
 const FILE_VIEW_TYPE = 'worktree-switcher-file-view';
@@ -474,7 +484,7 @@ class WorktreeView extends ItemView {
 
   getViewType() { return VIEW_TYPE; }
   getDisplayText() { return 'Worktree Switcher'; }
-  getIcon() { return 'git-branch'; }
+  getIcon() { return ICON_ID; }
 
   async onOpen() {
     const store = this.plugin.store;
@@ -791,6 +801,7 @@ class WorktreePicker extends SuggestModal {
 
 module.exports = class WorktreeSwitcherPlugin extends Plugin {
   async onload() {
+    addIcon(ICON_ID, ICON_SVG);
     this.settings = Object.assign({ repoPath: '', showHiddenFiles: false }, await this.loadData());
     this.switching = false;
     this.worktreeTabs = new Map();
@@ -807,10 +818,11 @@ module.exports = class WorktreeSwitcherPlugin extends Plugin {
     this.registerView(FILE_VIEW_TYPE, (leaf) => new WorktreeFileView(leaf, this));
     this.addSettingTab(new WorktreeSettingTab(this.app, this));
 
-    this.addRibbonIcon('git-branch', 'Open git worktrees', () => this.activateView());
+    this.addRibbonIcon(ICON_ID, 'Switch Worktrees', () => this.activateView());
     this.addCommand({
       id: 'open-worktree-view',
-      name: 'Open git worktrees',
+      name: 'Switch Worktrees',
+      icon: ICON_ID,
       callback: () => this.activateView(),
     });
     this.addCommand({

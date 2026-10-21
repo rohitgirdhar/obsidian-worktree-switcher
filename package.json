@@ -1,6 +1,6 @@
 {
   "name": "obsidian-worktree-switcher",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "private": true,
   "description": "Switch notes and the file tree between Git worktrees in the same window, and inspect changes and Markdown previews.",
   "license": "MIT",
