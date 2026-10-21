@@ -71,6 +71,12 @@ the current vault, and writes editor recovery files. It has no telemetry or
 network requests. Folder icons ask the operating system to reveal a worktree.
 Markdown rendering uses Obsidian's normal renderer and plugin behavior.
 
+Git runs directly with an argument array through `execFile`, without a command
+shell. Only status, diff, log, revision, merge-base, and worktree-list queries
+are allowed. File enumeration checks that Obsidian's tree matches the selected
+worktree after switching. These operations require desktop filesystem access;
+they do not grant the plugin a separate operating-system sandbox.
+
 ## Development
 
 Node.js 20 or later. No runtime or build dependencies.
@@ -82,7 +88,13 @@ npm run package
 ```
 
 `dist/` contains the runtime files, LICENSE, NOTICE, installation ZIP, and
-SHA256SUMS. A version tag builds a draft GitHub release.
+SHA256SUMS. A version tag builds a draft GitHub release with GitHub artifact
+attestations. A manual workflow run only attests a rebuild after checking that
+all build files match the existing release. Verify a downloaded asset with:
+
+```sh
+gh attestation verify main.js --repo rohitgirdhar/obsidian-worktree-switcher
+```
 
 ## License
 

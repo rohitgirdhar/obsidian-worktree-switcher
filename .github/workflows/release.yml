@@ -2,8 +2,11 @@ name: Release
 on:
   push:
     tags: ['*.*.*']
+  workflow_dispatch:
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -14,7 +17,23 @@ jobs:
           node-version: '22'
       - run: npm test
       - run: npm run package
+      - name: Verify existing release before attesting a manual rebuild
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(node -p 'require("./manifest.json").version')
+          verify_dir=$(mktemp -d)
+          gh release download "$version" --dir "$verify_dir"
+          for asset in dist/*; do
+            cmp "$asset" "$verify_dir/$(basename "$asset")"
+          done
+      - name: Attest release assets
+        uses: actions/attest@v4
+        with:
+          subject-path: 'dist/*'
       - name: Create draft release
+        if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
