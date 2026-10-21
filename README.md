@@ -9,10 +9,11 @@ Inspect changed files, read diffs, and preview Markdown.
 
 ![Animated demo: create a worktree, edit hello.md, and switch Obsidian in the same window](assets/demo.gif)
 
-[Watch the terminal and Obsidian demo](https://github.com/rohitgirdhar/obsidian-worktree-switcher/releases/download/0.0.1/worktree-switcher-demo.mp4).
-Create a Git worktree, edit `hello.md` in the terminal, and switch Obsidian to see
-that worktree's contents. Another terminal edit updates the open note live.
-Switching back shows main's original text.
+[Watch the terminal and Obsidian demo](https://raw.githubusercontent.com/rohitgirdhar/obsidian-worktree-switcher/main/assets/walkthrough.mp4).
+Recorded with Worktree Switcher 0.0.4 and Obsidian 1.14.4. Open **Switch Worktrees**,
+create a worktree in the terminal, and edit `hello.md`. Switch Obsidian to see the
+new contents, inspect the diff and Markdown preview, and watch another terminal
+edit update the note live. Switching back shows main's original text.
 
 ## Install and update
 
