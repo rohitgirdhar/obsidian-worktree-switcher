@@ -1,0 +1,92 @@
+# Worktree Switcher
+
+Switch Obsidian's notes and file tree between Git worktrees in the same window.
+Inspect changed files, read diffs, and preview Markdown.
+
+[Download 0.0.1](https://github.com/rohitgirdhar/obsidian-worktree-switcher/releases/tag/0.0.1)
+
+![Animated demo: create a worktree, edit hello.md, and switch Obsidian in the same window](assets/demo.gif)
+
+[Watch the terminal and Obsidian demo](https://github.com/rohitgirdhar/obsidian-worktree-switcher/releases/download/0.0.1/worktree-switcher-demo.mp4).
+Create a Git worktree, edit `hello.md` in the terminal, and switch Obsidian to see
+that worktree's contents. Another terminal edit updates the open note live.
+Switching back shows main's original text.
+
+## Install and update
+
+Requires desktop Obsidian 1.14.4 or later and Git on PATH.
+
+1. Download `worktree-switcher-0.0.1.zip` from the release page.
+2. Extract its `worktree-switcher` folder into `<vault>/.obsidian/plugins/`.
+3. Enable **Worktree Switcher** in Settings → Community plugins.
+
+For automatic updates, use
+[BRAT](https://github.com/TfTHacker/obsidian42-brat) to add
+`rohitgirdhar/obsidian-worktree-switcher`, select **Latest version**, and enable
+its update checks at startup. Manual installations require downloading each release.
+
+## Use
+
+Open a vault inside the main checkout of a Git repository. Create worktrees with
+Git or another tool, for example `git worktree add ../hello-edit -b edit-hello`.
+Each worktree must contain the vault at the same relative path.
+
+Open **Worktree Switcher: Open git worktrees** from the command palette, or click
+the Git branch ribbon icon. Click a worktree's two-arrow icon to switch; a check
+marks the current worktree. The panel picker and status-bar picker also switch.
+Expand a row to open its changed-file diff or Markdown preview.
+
+Notes and the file tree change in place. Settings and plugins stay in the vault
+you originally opened. Normal edits write to the worktree you are viewing.
+Hidden files are omitted from change lists unless enabled in plugin settings.
+
+The plugin only runs read-only Git queries. It does not create worktrees, commit,
+push, merge, delete worktrees, or create pull requests. For unrelated histories,
+the change list compares the worktree against its own HEAD.
+
+## Recovery and compatibility
+
+If another tool deletes the current worktree, choose a surviving worktree from
+the status bar. The original vault's settings folder must remain available.
+
+Open text buffers can be saved under the original vault's
+`.obsidian/worktree-recovery/` folder before their tabs are cleared. A notice gives
+the file path. Custom hidden configuration folders are supported. Recovery files
+contain note text; copy it to the intended note yourself. This does not restore
+externally deleted files, and non-text editors must be saved separately.
+
+Same-window switching uses private Obsidian desktop adapter and metadata APIs.
+The plugin checks compatibility before switching, but a newer Obsidian version
+meeting the minimum is not a guarantee. Other plugins may cache the original
+vault path and need additional support.
+
+Verified on 2026-10-21 with Obsidian 1.14.4 on Linux: fresh installation,
+same-window switching, changed note contents, preserved worktree edits, and
+unchanged Git refs. Graphical macOS and Windows verification remains outstanding.
+Automated tests run on Linux and macOS. Graphical editor-buffer recovery remains
+unverified because Obsidian may close deleted files' tabs before switching.
+
+The plugin reads the configured repository and worktrees, including paths outside
+the current vault, and writes editor recovery files. It has no telemetry or
+network requests. Folder icons ask the operating system to reveal a worktree.
+Markdown rendering uses Obsidian's normal renderer and plugin behavior.
+
+## Development
+
+Node.js 20 or later. No runtime or build dependencies.
+
+```sh
+npm test
+npm run check
+npm run package
+```
+
+`dist/` contains the runtime files, LICENSE, NOTICE, installation ZIP, and
+SHA256SUMS. A version tag builds a draft GitHub release.
+
+## License
+
+[MIT](LICENSE). Derived from [Worktree Viewer](https://github.com/sjwinkler19/obsidian-worktree-viewer)
+by Sebastian Winkler. Sebastian Winkler's copyright notice is preserved alongside Rohit Girdhar's
+notice for this project's changes. Release ZIPs include [NOTICE](NOTICE) and
+LICENSE; `main.js` also carries the complete license.

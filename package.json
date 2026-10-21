@@ -1,0 +1,20 @@
+{
+  "name": "obsidian-worktree-switcher",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Switch notes and the file tree between Git worktrees in the same window, and inspect changes and Markdown previews.",
+  "license": "MIT",
+  "author": "Rohit Girdhar",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test *.test.cjs",
+    "check": "node scripts/check-release.cjs",
+    "package": "node scripts/package.cjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rohitgirdhar/obsidian-worktree-switcher.git"
+  }
+}

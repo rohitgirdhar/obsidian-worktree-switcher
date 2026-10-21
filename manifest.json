@@ -1,0 +1,10 @@
+{
+  "id": "worktree-switcher",
+  "name": "Worktree Switcher",
+  "version": "0.0.1",
+  "minAppVersion": "1.14.4",
+  "description": "Switch notes and the file tree between Git worktrees in the same window, and inspect changes and Markdown previews.",
+  "author": "Rohit Girdhar",
+  "authorUrl": "https://github.com/rohitgirdhar",
+  "isDesktopOnly": true
+}

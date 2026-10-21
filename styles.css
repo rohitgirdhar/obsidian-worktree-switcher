@@ -1,0 +1,195 @@
+.worktree-panel {
+  overflow-x: hidden;
+  padding: 8px 10px;
+}
+.worktree-view-item {
+  min-width: 0;
+  margin-bottom: 8px;
+  padding: 8px;
+  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+  cursor: pointer;
+}
+.worktree-view-item:hover {
+  background-color: var(--background-modifier-hover);
+}
+.worktree-switch-controls {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0 12px;
+}
+.worktree-switch-controls label {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+}
+.worktree-switch-controls select {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  text-overflow: ellipsis;
+}
+.worktree-current {
+  box-shadow: inset 3px 0 var(--interactive-accent);
+  background: var(--background-secondary);
+}
+.worktree-panel button.worktree-icon-button {
+  margin: 0;
+  padding: 5px;
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  color: var(--text-muted);
+  background: transparent;
+  box-shadow: none;
+  border: none;
+  flex-shrink: 0;
+}
+.worktree-panel button.worktree-icon-button:hover:not(:disabled) {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+.worktree-panel button.worktree-icon-button:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 2px;
+}
+.worktree-icon-button svg {
+  width: 16px;
+  height: 16px;
+}
+.worktree-panel button.worktree-switch-button:disabled {
+  color: var(--text-accent);
+  opacity: 1;
+  background: transparent;
+  box-shadow: none;
+}
+.worktree-status-switcher {
+  cursor: pointer;
+}
+.worktree-view-branch {
+  font-weight: 600;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.worktree-view-meta {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+.worktree-view-item > .worktree-view-meta {
+  display: flex;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin: 4px 0 6px 18px;
+}
+.worktree-path-parent {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.worktree-path-name {
+  flex-shrink: 0;
+  max-width: 70%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.worktree-view-error {
+  color: var(--text-error);
+  padding: 8px;
+}
+.worktree-view-row {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) 28px;
+  align-items: center;
+  gap: 6px;
+}
+.worktree-view-actions {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+  margin-left: 18px;
+}
+.worktree-view-actions .worktree-view-fresh {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.worktree-view-file {
+  display: flex;
+  gap: 6px;
+  padding: 3px 0 3px 12px;
+  font-size: var(--font-ui-smaller);
+  cursor: pointer;
+  word-break: break-all;
+  min-width: 0;
+}
+.worktree-view-file:hover {
+  color: var(--text-accent);
+}
+.worktree-view-status {
+  font-weight: 700;
+  font-family: var(--font-monospace);
+}
+.worktree-view-status-A { color: var(--color-green); }
+.worktree-view-status-D { color: var(--color-red); }
+.worktree-view-status-M { color: var(--color-orange); }
+.worktree-file-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.worktree-diff {
+  font-family: var(--font-monospace);
+  font-size: var(--font-smaller);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.worktree-diff-add { color: var(--color-green); }
+.worktree-diff-del { color: var(--color-red); }
+.worktree-diff-hunk { color: var(--text-muted); }
+.worktree-panel .worktree-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 8px;
+  padding: 0;
+}
+.worktree-header .worktree-view-branch {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.worktree-header .worktree-view-fresh {
+  grid-column: 1;
+  grid-row: 2;
+}
+.worktree-header button {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}
+.worktree-chevron { color: var(--text-muted); }
+.worktree-view-fresh {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.worktree-stale {
+  color: var(--color-orange);
+  font-size: var(--font-ui-smaller);
+  padding: 2px 12px;
+}
+.worktree-footer {
+  padding: 7px 12px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  border-top: 1px solid var(--background-modifier-border);
+  overflow-wrap: anywhere;
+}
+
+/* Prevent edits while old editors are saved and the tree is redirected. */
+.worktree-is-switching .workspace { pointer-events: none; opacity: 0.65; }
