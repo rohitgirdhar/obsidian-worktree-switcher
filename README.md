@@ -82,6 +82,7 @@ they do not grant the plugin a separate operating-system sandbox.
 Node.js 20 or later. No runtime or build dependencies.
 
 ```sh
+npm ci
 npm test
 npm run check
 npm run package
