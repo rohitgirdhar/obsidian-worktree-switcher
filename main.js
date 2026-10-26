@@ -379,7 +379,7 @@ class WorktreeStore extends Events {
     return configured || this.repositoryPath || this.plugin.app.vault.adapter.getBasePath();
   }
 
-  // Refcounted lifecycle: polls only while a panel or file tab is open.
+  // The plugin holds one subscription to detect deletion, even with no panel.
   acquire() { if (++this.subscribers === 1) this.start(); }
   release() { this.subscribers = Math.max(0, this.subscribers - 1); if (this.subscribers === 0) this.stop(); }
 
@@ -396,7 +396,10 @@ class WorktreeStore extends Events {
   async refresh() {
     if (this.refreshPromise) return this.refreshPromise;
     this.refreshPromise = this.refreshOnce();
-    try { return await this.refreshPromise; } finally { this.refreshPromise = null; }
+    try { await this.refreshPromise; } finally { this.refreshPromise = null; }
+    // Clear the query promise first: automatic switching uses the normal command,
+    // which refreshes the list again before touching editors or the adapter.
+    if (!this.staleSince) await this.plugin.autoSwitchDeletedWorktree?.();
   }
 
   async refreshOnce() {
@@ -766,6 +769,21 @@ class WorktreeSettingTab extends PluginSettingTab {
           })
       );
     new Setting(this.containerEl)
+      .setName('Main branch')
+      .setDesc('Branch to open if the current worktree is deleted. Leave empty to prefer main, then master. Requires an existing worktree containing this vault. Press Enter or leave the field to apply.')
+      .addText((text) => {
+        text.setPlaceholder('Auto: main or master').setValue(this.plugin.settings.mainBranch);
+        this.plugin.registerDomEvent(text.inputEl, 'blur', async () => {
+          this.plugin.settings.mainBranch = text.getValue().trim();
+          this.plugin.autoSwitchAttempt = null;
+          await this.plugin.saveData(this.plugin.settings);
+          await this.plugin.store.refresh();
+        });
+        this.plugin.registerDomEvent(text.inputEl, 'keydown', (event) => {
+          if (event.key === 'Enter') text.inputEl.blur();
+        });
+      });
+    new Setting(this.containerEl)
       .setName('Show hidden files')
       .setDesc('Include dotfiles and hidden folders, including vault settings, in changed-file lists.')
       .addToggle((toggle) => toggle.setValue(this.plugin.settings.showHiddenFiles).onChange(async (value) => {
@@ -801,8 +819,9 @@ class WorktreePicker extends SuggestModal {
 
 module.exports = class WorktreeSwitcherPlugin extends Plugin {
   async onload() {
+    this.unloaded = false;
     addIcon(ICON_ID, ICON_SVG);
-    this.settings = Object.assign({ repoPath: '', showHiddenFiles: false }, await this.loadData());
+    this.settings = Object.assign({ repoPath: '', mainBranch: '', showHiddenFiles: false }, await this.loadData());
     this.switching = false;
     this.worktreeTabs = new Map();
     this.registerDomEvent(document, 'keydown', (event) => {
@@ -844,9 +863,11 @@ module.exports = class WorktreeSwitcherPlugin extends Plugin {
     });
     this.updateWorktreeStatus();
     await this.store.refresh();
+    if (!this.unloaded) this.store.acquire();
   }
 
   onunload() {
+    this.unloaded = true;
     this.store.stop();
   }
 
@@ -863,6 +884,39 @@ module.exports = class WorktreeSwitcherPlugin extends Plugin {
     await this.store.refresh();
     invariant(this.store.state && !this.store.staleSince, this.store.lastError?.message || 'Cannot read the repository.');
     new WorktreePicker(this.app, this, this.store.state.worktrees).open();
+  }
+
+  async autoSwitchDeletedWorktree() {
+    if (this.unloaded || this.switching || !this.currentWorktreePath) return;
+    const sourceVault = this.app.vault.adapter.getBasePath();
+    if (fs.existsSync(sourceVault) && fs.existsSync(path.join(this.currentWorktreePath, '.git'))) {
+      this.autoSwitchError = null;
+      this.autoSwitchAttempt = null;
+      return;
+    }
+    try {
+      const branches = this.settings.mainBranch?.trim() ? [this.settings.mainBranch.trim()] : ['main', 'master'];
+      let target;
+      for (const branch of branches) {
+        target = this.store.state.worktrees.find(row => row.branch === branch && !row.bare &&
+          row.path !== this.currentWorktreePath && fs.existsSync(row.path));
+        if (target) break;
+      }
+      invariant(target, `The current worktree was deleted. No surviving worktree for ${branches.join(' or ')}. Choose another worktree or change Main branch in settings.`);
+      const attempt = JSON.stringify([sourceVault, this.currentWorktreePath, this.settings.mainBranch,
+        target.path, target.head]);
+      if (this.autoSwitchAttempt === attempt) return;
+      this.autoSwitchAttempt = attempt;
+      // Reject a missing or escaped vault before locking input or touching tabs.
+      resolveWorktreeVault(sourceVault, this.currentWorktreePath, target.path, { allowMissingSource: true });
+      await this.switchWorktree(target);
+      this.autoSwitchError = null;
+    } catch (error) {
+      // A failed target is retried only when it changes or the setting is applied.
+      // Manual switching remains available without repeating edits every poll.
+      if (this.autoSwitchError !== error.message) new Notice(`Automatic worktree switch failed: ${error.message} Choose another worktree or apply Main branch in settings to retry.`, 15000);
+      this.autoSwitchError = error.message;
+    }
   }
 
   async switchWorktree(row) {

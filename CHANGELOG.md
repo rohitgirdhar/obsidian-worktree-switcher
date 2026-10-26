@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.0.5, 2026-10-26
+
+Automatically switch to a surviving main or master worktree when the active
+worktree is deleted, including when the panel is closed. Add a Main branch
+setting to choose a different branch to switch to. Preserve the existing editor
+buffer recovery and report when no suitable worktree is available.
+
 ## 0.0.4, 2026-10-21
 
 Add the Worktree Switcher icon to the ribbon and panel tab. Rename the panel

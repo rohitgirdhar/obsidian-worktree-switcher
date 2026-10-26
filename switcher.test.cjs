@@ -236,11 +236,14 @@ function pluginModule(overrides = {}) {
     'SuggestModal', 'MarkdownRenderer'].map(name => [name, class {}]));
   shim.Events = class { trigger() {} };
   shim.Notice = class { hide() {} };
+  shim.addIcon = () => {};
+  if (overrides.Setting) shim.Setting = overrides.Setting;
   const module = { exports: {} };
   vm.runInNewContext('(function(){' + fs.readFileSync(path.join(__dirname, 'main.js'), 'utf8') +
-    '\nmodule.exports.Store = WorktreeStore;})()', {
+    '\nmodule.exports.Store = WorktreeStore; module.exports.SettingTab = WorktreeSettingTab;})()', {
       require: name => name === 'obsidian' ? shim : overrides[name] || require(name), module, console,
       document: { body: { addClass() {}, removeClass() {} } },
+      window: overrides.window,
     });
   return module.exports;
 }
@@ -374,4 +377,216 @@ test('hidden-file settings control main-worktree change events', async (t) => {
   fs.writeFileSync(path.join(f.sourceWorktree, '.another-hidden-note'), 'Hidden by the setting');
   await store.refresh();
   assert.equal(events.filter(name => name === 'change').length, 0);
+});
+
+for (const branch of ['main', 'master', 'trunk']) {
+  test(`background refresh switches from a deleted active worktree to ${branch}`, async (t) => {
+    const f = await liveFixture(t);
+    const run = (...args) => execFileSync('git', ['-C', f.sourceWorktree, ...args], { encoding: 'utf8', stdio: 'pipe' });
+    run('init', '-b', branch); run('add', 'Notes/note.md');
+    run('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-m', 'fixture');
+    fs.rmSync(f.targetWorktree, { recursive: true });
+    run('worktree', 'add', '-b', 'feature', f.targetWorktree);
+    fs.writeFileSync(path.join(f.targetVault, 'note.md'), 'Feature content');
+    const Plugin = pluginModule();
+    const plugin = Object.create(Plugin.prototype);
+    Object.assign(plugin, { settings: { repoPath: '', mainBranch: branch === 'trunk' ? branch : '' },
+      currentWorktreePath: f.sourceWorktree, worktreeTabs: new Map(), updateWorktreeStatus() {},
+      app: { vault: f.vault, metadataCache: f.cache,
+        workspace: { iterateAllLeaves() {}, activeLeaf: null, getActiveFile() { return null; }, trigger() {} } } });
+    plugin.store = new Plugin.Store(plugin);
+    await plugin.store.refresh();
+    await plugin.switchWorktree(plugin.store.state.worktrees.find(row => row.branch === 'feature'));
+    assert.equal(f.adapter.getBasePath(), f.targetVault);
+    const tabStates = [];
+    if (branch === 'main') {
+      const state = { type: 'markdown', state: { file: 'note.md' } };
+      const leaf = {
+        view: { file: { path: 'note.md' }, editor: { getValue: () => 'Unsaved editor text' },
+          async save() { assert.fail('a deleted source must not be saved or recreated'); } },
+        getViewState: () => state,
+        async setViewState(next) {
+          tabStates.push(next.type);
+          assert.equal(f.adapter.getBasePath(), next.type === 'empty' ? f.targetVault : f.sourceVault,
+            'editor clears before redirect and reopens afterward');
+        },
+      };
+      plugin.app.workspace.iterateAllLeaves = callback => callback(leaf);
+    }
+    const refs = run('show-ref');
+    // A real worktree removal unregisters it as well as deleting the folder.
+    run('worktree', 'remove', '--force', f.targetWorktree);
+    await plugin.store.refresh();
+    assert.equal(plugin.currentWorktreePath, f.sourceWorktree);
+    assert.equal(f.adapter.getBasePath(), f.sourceVault);
+    assert.equal(fs.readFileSync(f.adapter.getFullRealPath('note.md'), 'utf8'), 'Unsaved-on-Git source note');
+    assert.equal(fs.existsSync(f.targetWorktree), false);
+    assert.equal(run('show-ref'), refs, 'automatic switching does not modify Git refs');
+    assert.equal(plugin.autoSwitchError, null);
+    if (branch === 'main') {
+      assert.deepEqual(tabStates, ['empty'], 'returning to main restores its previously empty tab layout');
+      const folder = path.join(f.sourceConfig, 'worktree-recovery');
+      const files = fs.readdirSync(folder);
+      assert.equal(files.length, 1);
+      assert.deepEqual(JSON.parse(fs.readFileSync(path.join(folder, files[0]), 'utf8')), {
+        sourceVault: f.targetVault, recovered: [{ file: 'note.md', content: 'Unsaved editor text' }],
+      });
+    }
+  });
+}
+
+test('automatic switching prefers main over master and respects an explicit branch without guessing', async (t) => {
+  const f = fixture(t);
+  fs.rmSync(f.targetWorktree, { recursive: true });
+  const Plugin = pluginModule();
+  const plugin = Object.create(Plugin.prototype);
+  const chosen = [];
+  Object.assign(plugin, { settings: { mainBranch: '' }, currentWorktreePath: f.targetWorktree,
+    app: { vault: { adapter: { getBasePath: () => f.targetVault } } },
+    store: { state: { worktrees: [
+      { path: f.sourceWorktree, branch: 'master' },
+      { path: f.sourceWorktree, branch: 'main' },
+      { path: f.dir, branch: 'trunk', bare: true },
+    ] } },
+    async switchWorktree(row) { chosen.push(row.branch); } });
+  await plugin.autoSwitchDeletedWorktree();
+  assert.deepEqual(chosen, ['main']);
+  plugin.settings.mainBranch = 'trunk';
+  await plugin.autoSwitchDeletedWorktree();
+  assert.match(plugin.autoSwitchError, /No surviving worktree for trunk/);
+  assert.deepEqual(chosen, ['main'], 'an explicit branch never falls back to another branch');
+  plugin.settings.mainBranch = 'master';
+  await plugin.autoSwitchDeletedWorktree();
+  assert.deepEqual(chosen, ['main', 'master']);
+  assert.equal(plugin.autoSwitchError, null);
+  plugin.switching = true;
+  await plugin.autoSwitchDeletedWorktree();
+  assert.deepEqual(chosen, ['main', 'master'], 'recovery does not interrupt a switch');
+});
+
+test('deleting an inactive worktree does not switch away from the active vault', async (t) => {
+  const f = fixture(t);
+  fs.mkdirSync(path.join(f.sourceWorktree, '.git'));
+  fs.rmSync(f.targetWorktree, { recursive: true });
+  const Plugin = pluginModule();
+  const plugin = Object.create(Plugin.prototype);
+  Object.assign(plugin, { currentWorktreePath: f.sourceWorktree,
+    app: { vault: { adapter: { getBasePath: () => f.sourceVault } } },
+    async switchWorktree() { assert.fail('must keep the active vault'); } });
+  await plugin.autoSwitchDeletedWorktree();
+  assert.equal(plugin.currentWorktreePath, f.sourceWorktree);
+});
+
+test('plugin keeps polling after the panel closes and stops on unload', async (t) => {
+  const f = await liveFixture(t);
+  const run = (...args) => execFileSync('git', ['-C', f.sourceWorktree, ...args], { stdio: 'pipe' });
+  run('init', '-b', 'main'); run('add', 'Notes/note.md');
+  run('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-m', 'fixture');
+  const timers = new Map();
+  const Plugin = pluginModule({ window: {
+    setInterval(callback, ms) { assert.equal(ms, 4000); timers.set(1, callback); return 1; },
+    clearInterval(id) { timers.delete(id); },
+  } });
+  const plugin = Object.create(Plugin.prototype);
+  Object.assign(plugin, { app: { vault: f.vault, metadataCache: f.cache },
+    async loadData() { return {}; }, registerDomEvent() {}, registerView() {},
+    addSettingTab() {}, addRibbonIcon() {}, addCommand() {}, registerInterval() {},
+    addStatusBarItem() { return { addClass() {}, setAttribute() {}, setText() {} }; } });
+  await plugin.onload();
+  await plugin.store.refresh();
+  assert.equal(plugin.store.subscribers, 1, 'plugin holds a subscription without any panel');
+  assert.equal(timers.size, 1);
+  plugin.store.acquire();
+  plugin.store.release();
+  assert.equal(timers.size, 1, 'closing the last panel leaves recovery polling active');
+  plugin.onunload();
+  assert.equal(timers.size, 0);
+});
+
+test('failed automatic switches do not touch editors again on every poll', async (t) => {
+  const f = fixture(t);
+  fs.rmSync(f.targetWorktree, { recursive: true });
+  const Plugin = pluginModule();
+  const plugin = Object.create(Plugin.prototype);
+  let attempts = 0;
+  Object.assign(plugin, { settings: { mainBranch: '' }, currentWorktreePath: f.targetWorktree,
+    app: { vault: { adapter: { getBasePath: () => f.targetVault } } },
+    store: { state: { worktrees: [{ path: f.sourceWorktree, branch: 'main', head: 'first' }] } },
+    async switchWorktree() { attempts++; throw new Error('simulated adapter failure'); } });
+  await plugin.autoSwitchDeletedWorktree();
+  await plugin.autoSwitchDeletedWorktree();
+  assert.equal(attempts, 1);
+  assert.match(plugin.autoSwitchError, /simulated adapter failure/);
+  plugin.store.state.worktrees[0].head = 'second';
+  await plugin.autoSwitchDeletedWorktree();
+  assert.equal(attempts, 2, 'a changed target allows a new attempt');
+  plugin.autoSwitchAttempt = null;
+  fs.rmSync(f.sourceVault, { recursive: true });
+  await plugin.autoSwitchDeletedWorktree();
+  assert.equal(attempts, 2, 'a missing destination vault fails before a switch starts');
+  assert.match(plugin.autoSwitchError, /does not contain a vault/);
+});
+
+test('an in-flight refresh cannot start an automatic switch after unload', async (t) => {
+  const f = fixture(t);
+  fs.rmSync(f.targetWorktree, { recursive: true });
+  const Plugin = pluginModule();
+  const plugin = Object.create(Plugin.prototype);
+  Object.assign(plugin, { settings: { mainBranch: '' }, currentWorktreePath: f.targetWorktree,
+    app: { vault: { adapter: { getBasePath: () => f.targetVault } } },
+    async switchWorktree() { assert.fail('unloaded plugins must not switch'); } });
+  plugin.store = new Plugin.Store(plugin);
+  plugin.store.state = { worktrees: [{ path: f.sourceWorktree, branch: 'main' }] };
+  let finish;
+  plugin.store.refreshOnce = () => new Promise(resolve => { finish = resolve; });
+  const refresh = plugin.store.refresh();
+  plugin.onunload();
+  finish();
+  await refresh;
+  assert.equal(plugin.autoSwitchAttempt, undefined);
+});
+
+test('main branch edits apply on blur or Enter, never while typing', async () => {
+  const fields = new Map();
+  class Setting {
+    setName(name) { this.name = name; return this; }
+    setDesc() { return this; }
+    addText(callback) {
+      const field = { value: '', events: {},
+        setPlaceholder() { return this; }, setValue(value) { this.value = value; return this; },
+        onChange(callback) { this.change = callback; return this; }, getValue() { return this.value; } };
+      field.inputEl = { field, blur: () => { field.blurPromise = field.events.blur(); } };
+      fields.set(this.name, field);
+      callback(field);
+      return this;
+    }
+    addToggle(callback) {
+      callback({ setValue() { return this; }, onChange() { return this; } });
+      return this;
+    }
+  }
+  const Plugin = pluginModule({ Setting });
+  let saves = 0;
+  let refreshes = 0;
+  const plugin = { settings: { repoPath: '', mainBranch: 'main', showHiddenFiles: false },
+    registerDomEvent(input, name, callback) { input.field.events[name] = callback; },
+    async saveData() { saves++; }, store: { async refresh() { refreshes++; } } };
+  const tab = new Plugin.SettingTab({}, plugin);
+  tab.containerEl = { empty() {} };
+  tab.display();
+  const field = fields.get('Main branch');
+  field.value = 'dev';
+  if (field.change) await field.change('dev');
+  assert.equal(plugin.settings.mainBranch, 'main', 'a prefix cannot become the switch target');
+  assert.equal(saves, 0);
+  assert.equal(refreshes, 0);
+  field.value = 'develop';
+  await field.events.blur();
+  assert.equal(plugin.settings.mainBranch, 'develop');
+  assert.equal(refreshes, 1);
+  field.value = 'trunk';
+  field.events.keydown({ key: 'Enter' });
+  await field.blurPromise;
+  assert.equal(plugin.settings.mainBranch, 'trunk');
+  assert.equal(refreshes, 2);
 });
