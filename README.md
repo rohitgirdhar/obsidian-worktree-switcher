@@ -5,7 +5,7 @@
 Switch Obsidian's notes and file tree between Git worktrees in the same window.
 Inspect changed files, read diffs, and preview Markdown.
 
-[Download 0.0.4](https://github.com/rohitgirdhar/obsidian-worktree-switcher/releases/tag/0.0.4)
+[Download 0.0.5](https://github.com/rohitgirdhar/obsidian-worktree-switcher/releases/tag/0.0.5)
 
 ![Animated demo: create a worktree, edit hello.md, and switch Obsidian in the same window](assets/demo.gif)
 
@@ -50,10 +50,22 @@ The plugin only runs read-only Git queries. It does not create worktrees, commit
 push, merge, delete worktrees, or create pull requests. For unrelated histories,
 the change list compares the worktree against its own HEAD.
 
-## Recovery and compatibility
+## Deleted worktrees and compatibility
 
-If another tool deletes the current worktree, choose a surviving worktree from
-the status bar. The original vault's settings folder must remain available.
+If another tool deletes the current worktree, the plugin detects it on its next
+background check, normally within four seconds, and switches in the same window
+to a surviving worktree on `main`, or `master` if no `main` worktree exists.
+Checks continue when the switcher panel is closed. Set **Main branch** in plugin
+settings to use another branch. Press Enter or leave the field to apply it.
+That branch must already have a worktree with the
+vault at the same relative path; the plugin does not check out or create branches.
+
+The deleted worktree stays deleted. The original vault's settings folder must
+remain available. If automatic switching fails, a notice explains why. Choose
+another surviving worktree from the status bar or apply the Main branch setting
+to retry. Failed attempts do not interrupt editing on every background check;
+the plugin tries again when the target worktree's path or commit changes.
+Deleting an inactive worktree only removes it from the list.
 
 Open text buffers can be saved under the original vault's
 `.obsidian/worktree-recovery/` folder before their tabs are cleared. A notice gives
