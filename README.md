@@ -5,7 +5,7 @@
 Switch Obsidian's notes and file tree between Git worktrees in the same window.
 Inspect changed files, read diffs, and preview Markdown.
 
-[Download 0.0.5](https://github.com/rohitgirdhar/obsidian-worktree-switcher/releases/tag/0.0.5)
+[Download 0.0.6](https://github.com/rohitgirdhar/obsidian-worktree-switcher/releases/tag/0.0.6)
 
 ![Animated demo: create a worktree, edit hello.md, and switch Obsidian in the same window](assets/demo.gif)
 

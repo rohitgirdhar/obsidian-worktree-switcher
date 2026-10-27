@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased, 2026-10-27
+## 0.0.6, 2026-10-27
 
 Keep matching file tabs open across manual and automatic worktree switches,
 including their view settings and active tab. Close only tabs for files absent
