@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased, 2026-10-27
+
+Keep matching file tabs open across manual and automatic worktree switches,
+including their view settings and active tab. Close only tabs for files absent
+from the destination. Remember the current layout so matching files can reopen
+if Obsidian closes their tabs before a deleted-worktree switch runs.
+
 ## 0.0.5, 2026-10-26
 
 Automatically switch to a surviving main or master worktree when the active
