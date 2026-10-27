@@ -111,7 +111,8 @@ async function liveFixture(t) {
     else tree.set(name, { path: name, type: entry.type });
   };
   for (const [name, entry] of await scanWorktreeVault(f.sourceVault)) await adapter.reconcileFile(entry.raw, name);
-  const vault = { adapter, configDir: '.obsidian', getFiles: () => [...tree.values()].filter((x) => x.type === 'file') };
+  const vault = { adapter, configDir: '.obsidian', getFiles: () => [...tree.values()].filter((x) => x.type === 'file'),
+    getFileByPath: name => tree.get(name)?.type === 'file' ? tree.get(name) : null };
   return { ...f, adapter, vault, cache, metadata, events, tree };
 }
 
@@ -424,7 +425,7 @@ for (const branch of ['main', 'master', 'trunk']) {
     assert.equal(run('show-ref'), refs, 'automatic switching does not modify Git refs');
     assert.equal(plugin.autoSwitchError, null);
     if (branch === 'main') {
-      assert.deepEqual(tabStates, ['empty'], 'returning to main restores its previously empty tab layout');
+      assert.deepEqual(tabStates, ['empty', 'markdown'], 'the current note stays open on main');
       const folder = path.join(f.sourceConfig, 'worktree-recovery');
       const files = fs.readdirSync(folder);
       assert.equal(files.length, 1);
@@ -488,8 +489,9 @@ test('plugin keeps polling after the panel closes and stops on unload', async (t
     clearInterval(id) { timers.delete(id); },
   } });
   const plugin = Object.create(Plugin.prototype);
-  Object.assign(plugin, { app: { vault: f.vault, metadataCache: f.cache },
-    async loadData() { return {}; }, registerDomEvent() {}, registerView() {},
+  Object.assign(plugin, { app: { vault: f.vault, metadataCache: f.cache,
+    workspace: { on() {}, iterateAllLeaves() {} } },
+    async loadData() { return {}; }, registerDomEvent() {}, registerView() {}, registerEvent() {},
     addSettingTab() {}, addRibbonIcon() {}, addCommand() {}, registerInterval() {},
     addStatusBarItem() { return { addClass() {}, setAttribute() {}, setText() {} }; } });
   await plugin.onload();
@@ -590,3 +592,222 @@ test('main branch edits apply on blur or Enter, never while typing', async () =>
   assert.equal(plugin.settings.mainBranch, 'trunk');
   assert.equal(refreshes, 2);
 });
+
+async function tabSwitchFixture(t) {
+  const f = await liveFixture(t);
+  const run = (...args) => execFileSync('git', ['-C', f.sourceWorktree, ...args], { encoding: 'utf8', stdio: 'pipe' });
+  run('init', '-b', 'main'); run('add', 'Notes/note.md');
+  run('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-m', 'fixture');
+  fs.rmSync(f.targetWorktree, { recursive: true });
+  run('worktree', 'add', '-b', 'feature', f.targetWorktree);
+  fs.writeFileSync(path.join(f.targetVault, 'note.md'), 'Feature note');
+  const leaves = [];
+  const listeners = new Map();
+  const workspace = {
+    activeLeaf: null, created: 0,
+    iterateAllLeaves(callback) { [...leaves].forEach(callback); },
+    on(name, callback) { listeners.set(name, callback); },
+    trigger(name) { listeners.get(name)?.(); },
+    getActiveFile() { return this.activeLeaf?.view.file || null; },
+    setActiveLeaf(leaf) { assert.ok(leaves.includes(leaf)); this.activeLeaf = leaf; },
+    getLeaf(mode) { assert.equal(mode, 'tab'); this.created++; return addLeaf(null); },
+  };
+  function addLeaf(file, extra = {}) {
+    let state = file ? { type: 'markdown', state: { file, mode: 'source', eState: { scroll: 12 } }, ...extra } : { type: 'empty' };
+    const changes = [];
+    const leaf = {
+      changes, detached: false,
+      getViewState: () => structuredClone(state),
+      async setViewState(next) {
+        changes.push({ type: next.type, root: f.adapter.getBasePath() });
+        state = structuredClone(next);
+        if (next.type === 'markdown') {
+          assert.ok(f.vault.getFileByPath(next.state.file));
+          this.view = { file: { path: next.state.file }, getViewType: () => 'markdown',
+            editor: { getValue: () => fs.readFileSync(f.adapter.getFullRealPath(next.state.file), 'utf8') },
+            async save() {} };
+        } else this.view = { getViewType: () => next.type };
+      },
+      detach() {
+        this.detached = true;
+        const index = leaves.indexOf(this);
+        assert.notEqual(index, -1);
+        leaves.splice(index, 1);
+        if (workspace.activeLeaf === this) workspace.activeLeaf = leaves[0] || null;
+      },
+      view: file ? { file: { path: file }, getViewType: () => 'markdown',
+        editor: { getValue: () => 'Unsaved text for ' + file }, async save() {} } : { getViewType: () => 'empty' },
+    };
+    leaves.push(leaf);
+    return leaf;
+  }
+  const Plugin = pluginModule();
+  const plugin = Object.create(Plugin.prototype);
+  Object.assign(plugin, { settings: { repoPath: '', mainBranch: '' }, currentWorktreePath: f.sourceWorktree,
+    updateWorktreeStatus() {}, app: { vault: f.vault, metadataCache: f.cache, workspace } });
+  plugin.store = new Plugin.Store(plugin);
+  await plugin.store.refresh();
+  for (const name of ['layout-change', 'file-open', 'active-leaf-change']) workspace.on(name, () => plugin.rememberWorktreeTabs());
+  return { ...f, plugin, workspace, leaves, addLeaf, run,
+    async switchTo(branch) {
+      await plugin.switchWorktree(plugin.store.state.worktrees.find(row => row.branch === branch));
+    } };
+}
+
+test('manual switches carry current tabs both ways, preserve focus and view state, and close only absent files', async (t) => {
+  const f = await tabSwitchFixture(t);
+  const first = f.addLeaf('note.md', { pinned: true });
+  const duplicate = f.addLeaf('note.md');
+  const initialState = first.getViewState();
+  const graph = f.addLeaf(null);
+  graph.view = { getViewType: () => 'graph' };
+  f.workspace.activeLeaf = first;
+  await f.switchTo('feature');
+  assert.equal(f.workspace.activeLeaf, first);
+  assert.deepEqual(first.getViewState(), initialState);
+  assert.equal(f.leaves.length, 3);
+  assert.equal(f.workspace.created, 0);
+  assert.equal(first.view.editor.getValue(), 'Feature note');
+  assert.equal(graph.changes.length, 0);
+  fs.writeFileSync(path.join(f.targetVault, 'feature-only.md'), 'Feature only');
+  await f.adapter.reconcileFile('feature-only.md', 'feature-only.md');
+  const absent = f.addLeaf('feature-only.md');
+  f.workspace.activeLeaf = absent;
+  const refs = f.run('show-ref');
+  await f.switchTo('main');
+  assert.equal(absent.detached, true, 'absent files close their tabs instead of leaving empty placeholders');
+  assert.deepEqual(f.leaves, [first, duplicate, graph]);
+  assert.deepEqual(first.getViewState(), initialState);
+  assert.equal(first.view.editor.getValue(), 'Unsaved-on-Git source note');
+  assert.equal(fs.readFileSync(path.join(f.targetVault, 'note.md'), 'utf8'), 'Feature note');
+  assert.equal(f.run('show-ref'), refs);
+  await f.switchTo('feature');
+  assert.deepEqual(f.leaves, [first, duplicate, graph], 'old per-worktree layouts do not reopen a closed tab');
+});
+
+for (const detached of [false, true]) {
+  test(`automatic switch restores matching tabs ${detached ? 'detached' : 'emptied'} by Obsidian before the poll`, async (t) => {
+    const f = await tabSwitchFixture(t);
+    await f.switchTo('feature');
+    const surviving = f.addLeaf('note.md', { pinned: true });
+    const state = surviving.getViewState();
+    fs.writeFileSync(path.join(f.targetVault, 'feature-only.md'), 'Feature only');
+    await f.adapter.reconcileFile('feature-only.md', 'feature-only.md');
+    const absent = f.addLeaf('feature-only.md');
+    f.workspace.activeLeaf = surviving;
+    f.workspace.trigger('layout-change');
+    assert.equal(f.plugin.tabSnapshot.tabs.length, 2);
+    f.run('worktree', 'remove', '--force', f.targetWorktree);
+    for (const leaf of [surviving, absent]) {
+      if (detached) leaf.detach();
+      else await leaf.setViewState({ type: 'empty' });
+    }
+    f.workspace.trigger('layout-change');
+    assert.equal(f.plugin.tabSnapshot.tabs.length, 2, 'deletion must not overwrite the remembered tabs');
+    const refs = f.run('show-ref');
+    await f.plugin.store.refresh();
+    assert.equal(f.adapter.getBasePath(), f.sourceVault);
+    assert.equal(f.leaves.length, 1);
+    assert.deepEqual(f.leaves[0].getViewState(), state);
+    assert.equal(f.workspace.activeLeaf, f.leaves[0]);
+    assert.equal(f.leaves[0].view.editor.getValue(), 'Unsaved-on-Git source note');
+    assert.equal(f.workspace.created, detached ? 1 : 0);
+    assert.equal(fs.existsSync(f.targetWorktree), false);
+    assert.equal(f.run('show-ref'), refs);
+    assert.equal(f.plugin.autoSwitchError, null);
+  });
+}
+
+test('tabs closed by the user in a healthy worktree are not reopened on deletion', async (t) => {
+  const f = await tabSwitchFixture(t);
+  await f.switchTo('feature');
+  const leaf = f.addLeaf('note.md');
+  f.workspace.trigger('file-open');
+  leaf.detach();
+  f.workspace.trigger('layout-change');
+  assert.equal(f.plugin.tabSnapshot.tabs.length, 0);
+  f.run('worktree', 'remove', '--force', f.targetWorktree);
+  await f.plugin.store.refresh();
+  assert.equal(f.adapter.getBasePath(), f.sourceVault);
+  assert.equal(f.leaves.length, 0);
+  assert.equal(f.workspace.created, 0);
+});
+
+test('note-first cleanup retains matching tabs until the worktree deletion switch', async (t) => {
+  const f = await tabSwitchFixture(t);
+  await f.switchTo('feature');
+  const leaf = f.addLeaf('note.md');
+  f.workspace.activeLeaf = leaf;
+  f.workspace.trigger('file-open');
+  fs.unlinkSync(path.join(f.targetVault, 'note.md'));
+  leaf.detach();
+  assert.equal(fs.existsSync(path.join(f.targetWorktree, '.git')), true);
+  f.workspace.trigger('layout-change');
+  assert.equal(f.plugin.tabSnapshot.tabs.length, 1, 'missing notes must survive in the snapshot even before .git is removed');
+  f.run('worktree', 'remove', '--force', f.targetWorktree);
+  await f.plugin.store.refresh();
+  assert.equal(f.leaves.length, 1);
+  assert.equal(f.leaves[0].view.file.path, 'note.md');
+  assert.equal(f.workspace.activeLeaf, f.leaves[0]);
+  assert.equal(f.plugin.autoSwitchError, null);
+});
+
+test('tabs closed after a failed automatic switch stay closed on a later manual switch', async (t) => {
+  const f = await tabSwitchFixture(t);
+  await f.switchTo('feature');
+  const leaf = f.addLeaf('note.md');
+  f.workspace.trigger('file-open');
+  f.plugin.settings.mainBranch = 'missing-branch';
+  f.run('worktree', 'remove', '--force', f.targetWorktree);
+  await f.plugin.store.refresh();
+  assert.match(f.plugin.autoSwitchError, /No surviving worktree/);
+  leaf.detach();
+  f.workspace.trigger('layout-change');
+  assert.equal(f.plugin.tabSnapshot.tabs.length, 0);
+  await f.switchTo('main');
+  assert.equal(f.adapter.getBasePath(), f.sourceVault);
+  assert.equal(f.leaves.length, 0);
+  assert.equal(f.workspace.created, 0);
+});
+
+test('a deleted file tab reused for a graph stays intact while its note reopens separately', async (t) => {
+  const f = await tabSwitchFixture(t);
+  await f.switchTo('feature');
+  const leaf = f.addLeaf('note.md');
+  f.workspace.activeLeaf = leaf;
+  f.workspace.trigger('file-open');
+  f.run('worktree', 'remove', '--force', f.targetWorktree);
+  await leaf.setViewState({ type: 'graph' });
+  f.workspace.trigger('layout-change');
+  await f.plugin.store.refresh();
+  assert.equal(f.leaves.length, 2);
+  assert.equal(leaf.view.getViewType(), 'graph');
+  assert.equal(f.leaves[1].view.file.path, 'note.md');
+  assert.equal(f.workspace.activeLeaf, leaf);
+});
+
+for (const event of ['layout-change', 'file-open', 'active-leaf-change']) {
+  test(`tabs already closed by deletion survive ${event} after an automatic switch fails`, async (t) => {
+    const f = await tabSwitchFixture(t);
+    await f.switchTo('feature');
+    const leaf = f.addLeaf('note.md');
+    const state = leaf.getViewState();
+    f.workspace.activeLeaf = leaf;
+    f.workspace.trigger('file-open');
+    f.plugin.settings.mainBranch = 'missing-branch';
+    f.run('worktree', 'remove', '--force', f.targetWorktree);
+    leaf.detach();
+    await f.plugin.store.refresh();
+    assert.match(f.plugin.autoSwitchError, /No surviving worktree/);
+    assert.equal(f.plugin.tabsClosedBeforeFailure.length, 1);
+    f.workspace.trigger(event);
+    assert.equal(f.plugin.tabSnapshot.tabs.length, 1, 'choosing another pane must not erase deletion-closed tabs');
+    await f.switchTo('main');
+    assert.equal(f.leaves.length, 1);
+    assert.deepEqual(f.leaves[0].getViewState(), state);
+    assert.equal(f.workspace.activeLeaf, f.leaves[0]);
+    assert.equal(f.leaves[0].view.editor.getValue(), 'Unsaved-on-Git source note');
+    assert.equal(f.plugin.autoSwitchError, null);
+    assert.equal(f.plugin.tabsClosedBeforeFailure, null);
+  });
+}

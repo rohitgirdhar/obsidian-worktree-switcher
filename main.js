@@ -823,7 +823,7 @@ module.exports = class WorktreeSwitcherPlugin extends Plugin {
     addIcon(ICON_ID, ICON_SVG);
     this.settings = Object.assign({ repoPath: '', mainBranch: '', showHiddenFiles: false }, await this.loadData());
     this.switching = false;
-    this.worktreeTabs = new Map();
+    this.tabSnapshot = null;
     this.registerDomEvent(document, 'keydown', (event) => {
       if (this.switching) { event.preventDefault(); event.stopImmediatePropagation(); }
     }, true);
@@ -832,6 +832,10 @@ module.exports = class WorktreeSwitcherPlugin extends Plugin {
       this.currentWorktreePath = fs.realpathSync((await git(this.app.vault.adapter.getBasePath(), ['rev-parse', '--show-toplevel'])).trim());
     } catch (_) { /* The panel reports an unavailable repository until metadata arrives. */ }
     this.store = new WorktreeStore(this);
+    for (const event of ['layout-change', 'file-open', 'active-leaf-change']) {
+      this.registerEvent(this.app.workspace.on(event, () => this.rememberWorktreeTabs()));
+    }
+    this.rememberWorktreeTabs();
 
     this.registerView(VIEW_TYPE, (leaf) => new WorktreeView(leaf, this));
     this.registerView(FILE_VIEW_TYPE, (leaf) => new WorktreeFileView(leaf, this));
@@ -886,11 +890,38 @@ module.exports = class WorktreeSwitcherPlugin extends Plugin {
     new WorktreePicker(this.app, this, this.store.state.worktrees).open();
   }
 
+  captureWorktreeTabs() {
+    const tabs = [];
+    this.app.workspace.iterateAllLeaves((leaf) => {
+      if (leaf.view.file) tabs.push({ leaf, state: leaf.getViewState(), file: leaf.view.file.path,
+        active: leaf === this.app.workspace.activeLeaf });
+    });
+    return tabs;
+  }
+
+  rememberWorktreeTabs() {
+    if (this.unloaded || this.switching || !this.currentWorktreePath) return;
+    const vault = this.app.vault.adapter.getBasePath();
+    const missingSource = !fs.existsSync(vault) || !fs.existsSync(path.join(this.currentWorktreePath, '.git'));
+    // Keep the layout during deletion. After a failed automatic attempt, honor
+    // subsequent tab changes while the user chooses another destination.
+    if (missingSource && !this.autoSwitchError) return;
+    const tabs = this.captureWorktreeTabs();
+    const previous = this.tabSnapshot?.vault === vault ? this.tabSnapshot.tabs : [];
+    // Cleanup can remove notes before .git. Retain tabs lost with those files,
+    // while dropping tabs the user closed with their files still on disk.
+    const vanished = this.autoSwitchError ?
+      (this.tabSnapshot?.vault === vault ? this.tabsClosedBeforeFailure || [] : []) : previous.filter(old =>
+      !tabs.some(tab => tab.leaf === old.leaf) && !fs.existsSync(path.join(vault, old.file)));
+    this.tabSnapshot = { vault, tabs: [...vanished, ...tabs] };
+  }
+
   async autoSwitchDeletedWorktree() {
     if (this.unloaded || this.switching || !this.currentWorktreePath) return;
     const sourceVault = this.app.vault.adapter.getBasePath();
     if (fs.existsSync(sourceVault) && fs.existsSync(path.join(this.currentWorktreePath, '.git'))) {
       this.autoSwitchError = null;
+      this.tabsClosedBeforeFailure = null;
       this.autoSwitchAttempt = null;
       return;
     }
@@ -911,7 +942,15 @@ module.exports = class WorktreeSwitcherPlugin extends Plugin {
       resolveWorktreeVault(sourceVault, this.currentWorktreePath, target.path, { allowMissingSource: true });
       await this.switchWorktree(target);
       this.autoSwitchError = null;
+      this.tabsClosedBeforeFailure = null;
     } catch (error) {
+      if (!this.autoSwitchError && this.tabSnapshot?.vault === sourceVault) {
+        const openTabs = this.captureWorktreeTabs();
+        // Keep tabs already lost to deletion, while later user closures can be
+        // honored separately during destination selection after this failure.
+        this.tabsClosedBeforeFailure = this.tabSnapshot.tabs.filter(old =>
+          !openTabs.some(tab => tab.leaf === old.leaf));
+      }
       // A failed target is retried only when it changes or the setting is applied.
       // Manual switching remains available without repeating edits every poll.
       if (this.autoSwitchError !== error.message) new Notice(`Automatic worktree switch failed: ${error.message} Choose another worktree or apply Main branch in settings to retry.`, 15000);
@@ -929,6 +968,9 @@ module.exports = class WorktreeSwitcherPlugin extends Plugin {
       // Never spawn Git in a folder that external cleanup may have removed.
       const sourceWorktree = this.currentWorktreePath ||
         fs.realpathSync((await git(sourceVault, ['rev-parse', '--show-toplevel'])).trim());
+      const startingTabs = this.captureWorktreeTabs();
+      const savedTabs = this.tabSnapshot?.vault === sourceVault ? this.tabSnapshot.tabs : [];
+      const snapshot = [...new Map([...savedTabs, ...startingTabs].map(tab => [tab.leaf, tab])).values()];
       await this.store.refresh();
       invariant(this.store.state && !this.store.staleSince, 'Refresh the worktree list before switching.');
       const target = this.store.state.worktrees.find((wt) => wt.path === row.path && !wt.bare);
@@ -945,14 +987,13 @@ module.exports = class WorktreeSwitcherPlugin extends Plugin {
       assertSwitchableAdapter(this.app.vault.adapter, this.app.metadataCache);
       const targetVault = resolveWorktreeVault(sourceVault, sourceWorktree, target.path, { allowMissingSource: true });
       await scanWorktreeVault(targetVault);
-      const tabs = [];
-      this.app.workspace.iterateAllLeaves((leaf) => {
-        if (leaf.view.file) tabs.push({ leaf, state: leaf.getViewState(), file: leaf.view.file.path });
-      });
-      this.worktreeTabs.set(sourceVault, tabs);
-      const restoreTabs = this.worktreeTabs.get(targetVault) || tabs;
-      const activeLeaf = this.app.workspace.activeLeaf;
-      if ((!fs.existsSync(sourceVault) || !fs.existsSync(path.join(sourceWorktree, '.git'))) && tabs.length) {
+      const tabs = this.captureWorktreeTabs();
+      const sourceDeleted = !fs.existsSync(sourceVault) || !fs.existsSync(path.join(sourceWorktree, '.git'));
+      // Carry the current layout across every switch. A deleted source can have
+      // lost its tabs before this command starts, so include its last snapshot.
+      const restoreTabs = sourceDeleted ? [...new Map([...snapshot, ...tabs].map(tab => [tab.leaf, tab])).values()] : tabs;
+      const activeLeaf = (sourceDeleted && snapshot.find(tab => tab.active)?.leaf) || this.app.workspace.activeLeaf;
+      if (sourceDeleted && tabs.length) {
         // Save open editor buffers outside the vanished worktree before clearing
         // any tabs. Never resurrect deleted notes through delayed autosaves.
         const recoveryFile = await preserveDeletedWorktreeBuffers(this.app.vault, tabs, sourceVault);
@@ -983,16 +1024,41 @@ module.exports = class WorktreeSwitcherPlugin extends Plugin {
       this.store.trigger('change', null);
       const availableLeaves = new Set();
       this.app.workspace.iterateAllLeaves((leaf) => availableLeaves.add(leaf));
+      let nextActiveLeaf = null;
       for (const tab of restoreTabs) {
-        if (availableLeaves.has(tab.leaf) && this.app.vault.getFileByPath(tab.file)) await tab.leaf.setViewState(tab.state);
+        if (!this.app.vault.getFileByPath(tab.file)) {
+          if (availableLeaves.has(tab.leaf) &&
+              (tabs.some(current => current.leaf === tab.leaf) || tab.leaf.view.getViewType() === 'empty')) {
+            tab.leaf.detach();
+            availableLeaves.delete(tab.leaf);
+          }
+          continue;
+        }
+        let leaf = tab.leaf;
+        const repurposed = availableLeaves.has(leaf) && !tabs.some(current => current.leaf === leaf) &&
+          leaf.view.getViewType() !== 'empty';
+        if (!availableLeaves.has(leaf) || repurposed) {
+          // Obsidian may have detached the source tab on external deletion.
+          // A leaf reused for a graph or another view must also stay intact.
+          if (!sourceDeleted) continue;
+          leaf = this.app.workspace.getLeaf('tab');
+          availableLeaves.add(leaf);
+        }
+        await leaf.setViewState(tab.state);
+        if (tab.leaf === activeLeaf && !repurposed) nextActiveLeaf = leaf;
       }
-      if (activeLeaf) this.app.workspace.setActiveLeaf(activeLeaf, { focus: true });
+      if (nextActiveLeaf || availableLeaves.has(activeLeaf)) {
+        this.app.workspace.setActiveLeaf(nextActiveLeaf || activeLeaf, { focus: true });
+      }
       this.app.workspace.trigger('file-open', this.app.workspace.getActiveFile());
       new Notice(`Viewing ${target.branch || 'detached worktree'} in this window`);
+      this.autoSwitchError = null;
+      this.tabsClosedBeforeFailure = null;
     } finally {
       progress.hide();
       document.body.removeClass('worktree-is-switching');
       this.switching = false;
+      this.rememberWorktreeTabs();
     }
   }
 

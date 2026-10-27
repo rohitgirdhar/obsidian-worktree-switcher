@@ -46,6 +46,12 @@ Notes and the file tree change in place. Settings and plugins stay in the vault
 you originally opened. Normal edits write to the worktree you are viewing.
 Hidden files are omitted from change lists unless enabled in plugin settings.
 
+Every switch carries your current file tabs into the destination worktree,
+including manual switches. Tabs keep their view settings and active tab when
+the same files exist there; tabs for absent files close. Open notes show the
+destination's contents. If deleting a worktree makes Obsidian close tabs before
+the automatic switch, the plugin reopens matching files from its last tab snapshot.
+
 The plugin only runs read-only Git queries. It does not create worktrees, commit,
 push, merge, delete worktrees, or create pull requests. For unrelated histories,
 the change list compares the worktree against its own HEAD.
