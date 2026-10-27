@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased, 2026-10-27
+## 0.0.7, 2026-10-27
 
 Refresh matching Markdown notes in their existing editors during worktree
 switches. Pause autosaves while paths change, restore cursor and scroll, and
