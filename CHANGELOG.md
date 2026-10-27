@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased, 2026-10-27
+
+Refresh matching Markdown notes in their existing editors during worktree
+switches. Pause autosaves while paths change, restore cursor and scroll, and
+keep the safe reopen path for other or incompatible file views. Remove the
+workspace dimming during switches.
+
 ## 0.0.6, 2026-10-27
 
 Keep matching file tabs open across manual and automatic worktree switches,

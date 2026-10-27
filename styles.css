@@ -191,5 +191,5 @@
   overflow-wrap: anywhere;
 }
 
-/* Prevent edits while old editors are saved and the tree is redirected. */
-.worktree-is-switching .workspace { pointer-events: none; opacity: 0.65; }
+/* Prevent edits while editors are paused and the tree is redirected. */
+.worktree-is-switching .workspace { pointer-events: none; }

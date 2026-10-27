@@ -38,6 +38,7 @@ const { execFile } = require('child_process');
 const { promisify } = require('util');
 const fs = require('fs');
 const path = require('path');
+const { randomUUID } = require('crypto');
 const execFileP = promisify(execFile);
 
 // ---------------- pure core (tested via `node --test`) ----------------
@@ -319,11 +320,17 @@ async function preserveDeletedWorktreeBuffers(vault, tabs, sourceVault) {
       'The current worktree was deleted. Save open non-text files before switching.');
     return { file, content: leaf.view.editor.getValue() };
   });
+  return preserveWorktreeText(vault, recovered, sourceVault);
+}
+
+async function preserveWorktreeText(vault, recovered, sourceVault) {
+  invariant(recovered.length > 0 && recovered.every(item => typeof item.file === 'string' && typeof item.content === 'string'),
+    'Editor backups must contain file paths and text.');
   const configHome = vault.adapter[WORKTREE_ROOT]?.home;
   invariant(configHome && fs.existsSync(configHome), 'Cannot locate a surviving configuration folder for editor recovery.');
   const recoveryDir = path.join(configHome, vault.configDir, 'worktree-recovery');
   await fs.promises.mkdir(recoveryDir, { recursive: true });
-  const recoveryFile = path.join(recoveryDir, `${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
+  const recoveryFile = path.join(recoveryDir, `${new Date().toISOString().replace(/[:.]/g, '-')}-${randomUUID()}.json`);
   await fs.promises.writeFile(recoveryFile, JSON.stringify({ sourceVault, recovered }, null, 2), { flag: 'wx' });
   return recoveryFile;
 }
@@ -827,6 +834,9 @@ module.exports = class WorktreeSwitcherPlugin extends Plugin {
     this.registerDomEvent(document, 'keydown', (event) => {
       if (this.switching) { event.preventDefault(); event.stopImmediatePropagation(); }
     }, true);
+    this.registerDomEvent(document, 'beforeinput', (event) => {
+      if (this.switching) { event.preventDefault(); event.stopImmediatePropagation(); }
+    }, true);
     this.currentWorktreePath = null;
     try {
       this.currentWorktreePath = fs.realpathSync((await git(this.app.vault.adapter.getBasePath(), ['rev-parse', '--show-toplevel'])).trim());
@@ -963,8 +973,11 @@ module.exports = class WorktreeSwitcherPlugin extends Plugin {
     this.switching = true;
     document.body.addClass('worktree-is-switching');
     const progress = new Notice('Switching worktree in this window…', 0);
+    const retainedEditors = new Map();
+    let sourceDeleted = false;
+    let sourceVault;
     try {
-      const sourceVault = this.app.vault.adapter.getBasePath();
+      sourceVault = this.app.vault.adapter.getBasePath();
       // Never spawn Git in a folder that external cleanup may have removed.
       const sourceWorktree = this.currentWorktreePath ||
         fs.realpathSync((await git(sourceVault, ['rev-parse', '--show-toplevel'])).trim());
@@ -986,16 +999,20 @@ module.exports = class WorktreeSwitcherPlugin extends Plugin {
         fs.realpathSync(path.resolve(target.path, targetCommon.trim())), 'The target belongs to a different repository.');
       assertSwitchableAdapter(this.app.vault.adapter, this.app.metadataCache);
       const targetVault = resolveWorktreeVault(sourceVault, sourceWorktree, target.path, { allowMissingSource: true });
-      await scanWorktreeVault(targetVault);
+      const targetEntries = await scanWorktreeVault(targetVault);
       const tabs = this.captureWorktreeTabs();
-      const sourceDeleted = !fs.existsSync(sourceVault) || !fs.existsSync(path.join(sourceWorktree, '.git'));
+      sourceDeleted = !fs.existsSync(sourceVault) || !fs.existsSync(path.join(sourceWorktree, '.git'));
       // Carry the current layout across every switch. A deleted source can have
       // lost its tabs before this command starts, so include its last snapshot.
       const restoreTabs = sourceDeleted ? [...new Map([...snapshot, ...tabs].map(tab => [tab.leaf, tab])).values()] : tabs;
       const activeLeaf = (sourceDeleted && snapshot.find(tab => tab.active)?.leaf) || this.app.workspace.activeLeaf;
+      const sourceBackupData = new Map();
       if (sourceDeleted && tabs.length) {
         // Save open editor buffers outside the vanished worktree before clearing
         // any tabs. Never resurrect deleted notes through delayed autosaves.
+        for (const tab of tabs) {
+          if (typeof tab.leaf.view.editor?.getValue === 'function') sourceBackupData.set(tab.leaf, tab.leaf.view.editor.getValue());
+        }
         const recoveryFile = await preserveDeletedWorktreeBuffers(this.app.vault, tabs, sourceVault);
         new Notice(`Saved open notes from the deleted worktree to ${recoveryFile}`, 15000);
       } else {
@@ -1004,11 +1021,36 @@ module.exports = class WorktreeSwitcherPlugin extends Plugin {
           else invariant(leaf.view.getViewType() !== 'markdown', 'Save your open notes before switching.');
         }
       }
-      // Unload file editors before redirecting paths, so delayed autosaves cannot
-      // put a previous worktree's text into the destination's note.
+      // Obsidian's Markdown TextFileView checks saving before any write, including
+      // its debounce's bound save callback. Pause that path while keeping its
+      // editor mounted; onModify also skips a view while saving is true.
+      await this.app.vault.adapter.queue(async () => {});
+      for (const tab of tabs) {
+        const view = tab.leaf.view;
+        if (targetEntries.get(tab.file)?.type !== 'file' || view.getViewType?.() !== 'markdown' ||
+            typeof view.setData !== 'function' || typeof view.getViewData !== 'function' ||
+            typeof view.saving !== 'boolean' || typeof view.saveAgain !== 'boolean' ||
+            typeof view.dirty !== 'boolean' || !('lastSavedData' in view)) continue;
+        invariant(!view.saving, 'A note is still being saved. Try switching again when the save finishes.');
+        const pausedData = view.getViewData();
+        // An edit can arrive after save() resolved. The unload path saves it to
+        // the source before redirecting, rather than overwriting it in place.
+        if (!sourceDeleted && pausedData !== view.lastSavedData) continue;
+        retainedEditors.set(tab.leaf, { view, tab, lastSavedData: view.lastSavedData,
+          dirty: view.dirty, saveAgain: view.saveAgain, refreshed: false,
+          pausedData: sourceBackupData.get(tab.leaf) ?? pausedData, ephemeral: view.getEphemeralState?.() });
+      }
+      for (const { view } of retainedEditors.values()) {
+        view.saving = true;
+        view.saveAgain = false;
+        view.dirty = false;
+        view.lastSavedData = null;
+      }
+      // Other file views keep the existing unload path to stop delayed saves.
       const cleared = [];
       try {
         for (const tab of tabs) {
+          if (retainedEditors.has(tab.leaf)) continue;
           await tab.leaf.setViewState({ type: 'empty' });
           cleared.push(tab);
         }
@@ -1020,6 +1062,36 @@ module.exports = class WorktreeSwitcherPlugin extends Plugin {
         throw error;
       }
       this.currentWorktreePath = fs.realpathSync(target.path);
+      for (const [leaf, held] of retainedEditors) {
+        const { view, tab, ephemeral } = held;
+        if (leaf.view !== view) continue;
+        const latestData = view.getViewData();
+        if (latestData !== held.pausedData) {
+          held.backupPending = true;
+          const backup = await preserveWorktreeText(this.app.vault, [{ file: tab.file, content: latestData }], sourceVault);
+          held.backupPending = false;
+          new Notice(`Saved changes received during the switch to ${backup}`, 15000);
+          await leaf.setViewState({ type: 'empty' });
+          continue;
+        }
+        try {
+          invariant(view.file === this.app.vault.getFileByPath(tab.file), 'The open note changed during the worktree switch.');
+          const content = readWorktreeFile(targetVault, tab.file);
+          view.lastSavedData = content;
+          // A new document resets undo history while retaining the view and
+          // editor objects; undo must never bring the source branch's text back.
+          view.setData(content, true);
+          if (ephemeral && view.setEphemeralState) view.setEphemeralState(ephemeral);
+          invariant(view.getViewData() === content, 'The editor did not load the destination note completely.');
+          view.dirty = false;
+          view.saveAgain = false;
+          held.refreshed = true;
+        } catch (_) {
+          // An incompatible editor can still use the regular reopen path.
+          view.lastSavedData = null;
+          await leaf.setViewState({ type: 'empty' });
+        }
+      }
       this.updateWorktreeStatus();
       this.store.trigger('change', null);
       const availableLeaves = new Set();
@@ -1044,7 +1116,7 @@ module.exports = class WorktreeSwitcherPlugin extends Plugin {
           leaf = this.app.workspace.getLeaf('tab');
           availableLeaves.add(leaf);
         }
-        await leaf.setViewState(tab.state);
+        if (!retainedEditors.get(leaf)?.refreshed) await leaf.setViewState(tab.state);
         if (tab.leaf === activeLeaf && !repurposed) nextActiveLeaf = leaf;
       }
       if (nextActiveLeaf || availableLeaves.has(activeLeaf)) {
@@ -1055,10 +1127,48 @@ module.exports = class WorktreeSwitcherPlugin extends Plugin {
       this.autoSwitchError = null;
       this.tabsClosedBeforeFailure = null;
     } finally {
+      const cleanupErrors = [];
+      for (const { view, tab, lastSavedData, dirty, saveAgain, refreshed, backupPending, pausedData } of retainedEditors.values()) {
+        if (!refreshed) {
+          if (this.app.vault.adapter.getBasePath() !== sourceVault && tab.leaf.view === view) {
+            if (backupPending) {
+              cleanupErrors.push(new Error(`Unsaved text in ${tab.file} could not be backed up.`));
+              continue;
+            }
+            try {
+              // An earlier editor may have failed before this one was reached.
+              // Preserve any late changes before closing its paused view too.
+              const content = view.getViewData();
+              if (content !== pausedData) {
+                const backup = await preserveWorktreeText(this.app.vault, [{ file: tab.file, content }], sourceVault);
+                new Notice(`Saved changes received during the switch to ${backup}`, 15000);
+              }
+              await tab.leaf.setViewState({ type: 'empty' });
+            }
+            catch (error) {
+              view.lastSavedData = null;
+              cleanupErrors.push(error);
+              continue;
+            }
+          }
+          view.lastSavedData = !sourceDeleted && this.app.vault.adapter.getBasePath() === sourceVault ? lastSavedData : null;
+          view.dirty = dirty;
+          view.saveAgain = saveAgain;
+        }
+        view.saving = false;
+        if (tab.leaf.view === view && view.lastSavedData !== null && view.getViewData() !== view.lastSavedData) {
+          view.requestSave?.();
+        }
+      }
       progress.hide();
       document.body.removeClass('worktree-is-switching');
       this.switching = false;
       this.rememberWorktreeTabs();
+      if (cleanupErrors.length) {
+        const error = new Error('Some notes could not be backed up or closed safely after the switch failed. Their autosaves remain paused. Copy any unsaved text before restarting Obsidian.', { cause: cleanupErrors[0] });
+        new Notice(error.message, 0);
+        throw error;
+      }
     }
   }
 
