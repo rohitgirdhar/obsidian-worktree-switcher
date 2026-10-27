@@ -52,6 +52,12 @@ the same files exist there; tabs for absent files close. Open notes show the
 destination's contents. If deleting a worktree makes Obsidian close tabs before
 the automatic switch, the plugin reopens matching files from its last tab snapshot.
 
+Compatible Markdown editors stay mounted while their text refreshes in place;
+their autosaves pause during the switch. Undo history resets so Undo cannot
+restore another worktree's text. Other file views and incompatible
+editors use the safe reopen path. A tab that Obsidian already closed after
+external deletion still has to reopen.
+
 The plugin only runs read-only Git queries. It does not create worktrees, commit,
 push, merge, delete worktrees, or create pull requests. For unrelated histories,
 the change list compares the worktree against its own HEAD.
