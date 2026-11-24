@@ -242,13 +242,61 @@ function pluginModule(overrides = {}) {
   if (overrides.Setting) shim.Setting = overrides.Setting;
   const module = { exports: {} };
   vm.runInNewContext('(function(){' + fs.readFileSync(path.join(__dirname, 'main.js'), 'utf8') +
-    '\nmodule.exports.Store = WorktreeStore; module.exports.SettingTab = WorktreeSettingTab;})()', {
+    '\nmodule.exports.Store = WorktreeStore; module.exports.SettingTab = WorktreeSettingTab; module.exports.View = WorktreeView;})()', {
       require: name => name === 'obsidian' ? shim : overrides[name] || require(name), module, console,
       document: { body: { addClass() {}, removeClass() {} } },
       window: overrides.window,
     });
   return module.exports;
 }
+
+test('a new linked worktree shows its creation age even when HEAD is two days old', async (t) => {
+  const f = fixture(t);
+  const created = Date.now();
+  const commitDate = new Date(created - 2 * 24 * 60 * 60 * 1000).toISOString();
+  const git = (...args) => execFileSync('git', ['-C', f.sourceWorktree, ...args], {
+    encoding: 'utf8', stdio: 'pipe', env: { ...process.env, GIT_COMMITTER_DATE: commitDate },
+  });
+  git('init', '-b', 'main');
+  git('add', 'Notes/note.md');
+  git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-m', 'base');
+  fs.rmSync(f.targetWorktree, { recursive: true });
+  git('worktree', 'add', '-b', 'feature', f.targetWorktree);
+  const gitDir = path.join(f.sourceWorktree, '.git', 'worktrees', 'feature');
+  let birthtimeMs = created;
+  const { Store, View } = pluginModule({ fs: { ...fs, promises: {
+    async stat(file) {
+      assert.equal(file, gitDir);
+      return { birthtimeMs, ctimeMs: created + 1 };
+    },
+  } } });
+  const plugin = { settings: { repoPath: f.sourceWorktree }, updateWorktreeStatus() {} };
+  plugin.store = new Store(plugin);
+  const view = new View(null, plugin);
+  view.staleEl = { hide() {} };
+  view.liveEl = view.footerEl = { setText() {} };
+  const label = {
+    setText(value) { this.text = value; },
+    setAttribute(name, value) { this[name] = value; },
+  };
+  view.rowEls.set(f.targetWorktree, { freshEl: label });
+
+  await plugin.store.refresh();
+  assert.equal(plugin.store.lastError, null);
+  const [main, linked] = plugin.store.state.worktrees;
+  assert.equal(linked.head, main.head);
+  assert.equal(linked.createdTs, created);
+  view.patchPresence();
+  assert.match(label.text, /^created (just now|\d+s ago)$/);
+  assert.equal(label.title, 'last commit 2d ago');
+
+  birthtimeMs = created + 1; // Filesystems can report ctime instead of birthtime.
+  await plugin.store.refresh();
+  assert.equal(plugin.store.lastError, null);
+  view.patchPresence();
+  assert.equal(label.text, 'last commit 2d ago');
+  assert.equal(label.title, '');
+});
 
 test('list refresh ignores deleted Git registrations and awaits concurrent refreshes', async (t) => {
   const f = fixture(t);
