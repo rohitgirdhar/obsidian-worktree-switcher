@@ -58,6 +58,15 @@ async function git(cwd, args) {
   }
 }
 
+async function linkedWorktreeCreationTime(worktreePath) {
+  // The Git directory belongs to this checkout and survives a worktree move.
+  const gitDir = (await git(worktreePath, ['rev-parse', '--absolute-git-dir'])).replace(/\r?\n$/, '');
+  invariant(path.isAbsolute(gitDir), 'Git returned an invalid worktree metadata path.');
+  const { birthtimeMs, ctimeMs } = await fs.promises.stat(gitDir);
+  // Some filesystems report zero or ctime in place of a creation timestamp.
+  return birthtimeMs > 0 && birthtimeMs !== ctimeMs ? birthtimeMs : null;
+}
+
 // Parses `git worktree list --porcelain` output into worktree objects.
 function parseWorktrees(output) {
   return output
@@ -378,7 +387,7 @@ class WorktreeStore extends Events {
     this.lastError = null;
     this.repositoryPath = null;
     this.baseShaCache = new Map(); // `${wtHead}:${mainHead}` -> merge-base sha
-    this.freshCache = new Map();   // headSha -> commit time ms
+    this.commitTimeCache = new Map(); // headSha -> commit time ms
   }
 
   repoPath() {
@@ -422,7 +431,7 @@ class WorktreeStore extends Events {
         // Git registrations can outlive external folder deletion.
         if (wt.prunable || !fs.existsSync(wt.path) ||
             (wt.path !== main.path && !wt.bare && !fs.existsSync(path.join(wt.path, '.git')))) continue;
-        if (wt.bare) { rows.push({ ...wt, isMain: false, changes: [], slice: wt.path, freshTs: null }); continue; }
+        if (wt.bare) { rows.push({ ...wt, isMain: false, changes: [], slice: wt.path }); continue; }
         const isMain = wt.path === main.path;
         try {
           const status = await git(wt.path, ['status', '--porcelain', '-z']);
@@ -444,13 +453,14 @@ class WorktreeStore extends Events {
           const diff = parseNameStatus(await git(wt.path, ['diff', '--name-status', '-z', diffTarget]));
           const changes = unionChanges(diff, parseUntracked(status))
             .filter((change) => this.plugin.settings.showHiddenFiles || !isHiddenPath(change.path));
-          if (!this.freshCache.has(wt.head)) {
-            const ct = parseInt((await git(wt.path, ['log', '-1', '--format=%ct'])).trim(), 10);
-            this.freshCache.set(wt.head, Number.isFinite(ct) ? ct * 1000 : null);
+          if (!this.commitTimeCache.has(wt.head)) {
+            const ct = parseInt((await git(wt.path, ['log', '-1', '--format=%ct', wt.head])).trim(), 10);
+            this.commitTimeCache.set(wt.head, Number.isFinite(ct) ? ct * 1000 : null);
           }
           rows.push({
             ...wt, isMain, changes, diffTarget,
-            freshTs: this.freshCache.get(wt.head),
+            commitTs: this.commitTimeCache.get(wt.head),
+            createdTs: isMain ? null : await linkedWorktreeCreationTime(wt.path),
             slice: JSON.stringify([wt.head, wt.branch, changes, diffTarget]),
           });
         } catch (error) {
@@ -654,11 +664,19 @@ class WorktreeView extends ItemView {
       this.liveEl.setText('● live');
     }
     let files = 0;
+    const now = Date.now();
     for (const row of state.worktrees) {
       const info = this.rowEls.get(row.path);
       if (!row.isMain) files += row.changes.length;
       if (!info) continue;
-      info.freshEl.setText(row.freshTs ? `updated ${relativeTime(Date.now() - row.freshTs)} ago` : '');
+      const commitAge = row.commitTs == null ? '' : `last commit ${relativeTime(Math.max(0, now - row.commitTs))} ago`;
+      if (row.createdTs == null) {
+        info.freshEl.setText(commitAge);
+      } else {
+        const age = now - row.createdTs;
+        info.freshEl.setText(age < 1000 ? 'created just now' : `created ${relativeTime(age)} ago`);
+      }
+      info.freshEl.setAttribute('title', row.createdTs == null ? '' : commitAge);
     }
     const count = Math.max(0, state.worktrees.length - 1);
     this.footerEl.setText(`${files} file${files === 1 ? '' : 's'} changed across ${count} worktree${count === 1 ? '' : 's'}`);
@@ -770,7 +788,7 @@ class WorktreeSettingTab extends PluginSettingTab {
             this.plugin.settings.repoPath = value.trim();
             this.plugin.store.repositoryPath = null;
             this.plugin.store.baseShaCache.clear();
-            this.plugin.store.freshCache.clear();
+            this.plugin.store.commitTimeCache.clear();
             await this.plugin.saveData(this.plugin.settings);
             await this.plugin.store.refresh();
           })
